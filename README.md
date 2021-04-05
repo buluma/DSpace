@@ -1,7 +1,7 @@
 
 # DSpace
 
-[![Build Status](https://travis-ci.org/buluma/DSpace.png?branch=master)](https://travis-ci.org/buluma/DSpace)
+[![Build](https://github.com/buluma/DSpace/actions/workflows/build.yml/badge.svg)](https://github.com/buluma/DSpace/actions/workflows/build.yml)
 
 [DSpace Documentation](https://wiki.duraspace.org/display/DSDOC/) | 
 [DSpace Releases](https://github.com/DSpace/DSpace/releases) |
