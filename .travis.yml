@@ -21,7 +21,7 @@ before_install:
   - npm install -g bower
   # Install Grunt & print version info
   - npm install -g grunt && npm install -g grunt-cli
-  - grunt --version
+#   - grunt --version
   # Print ruby version info (should be installed)
   - ruby -v
   # Install Sass & print version info
