@@ -7,8 +7,6 @@
  */
 package org.dspace.services.caching;
 
-import java.io.IOException;
-import java.io.InputStream;
 import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -18,46 +16,46 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
 
-import net.sf.ehcache.CacheManager;
 import net.sf.ehcache.Ehcache;
 import net.sf.ehcache.Statistics;
-
 import org.dspace.kernel.ServiceManager;
 import org.dspace.kernel.mixins.ConfigChangeListener;
-import org.dspace.kernel.mixins.InitializedService;
 import org.dspace.kernel.mixins.ServiceChangeListener;
-import org.dspace.kernel.mixins.ShutdownService;
 import org.dspace.providers.CacheProvider;
 import org.dspace.services.CachingService;
 import org.dspace.services.ConfigurationService;
 import org.dspace.services.RequestService;
 import org.dspace.services.caching.model.EhcacheCache;
 import org.dspace.services.caching.model.MapCache;
-import org.dspace.services.model.*;
+import org.dspace.services.model.Cache;
+import org.dspace.services.model.CacheConfig;
 import org.dspace.services.model.CacheConfig.CacheScope;
+import org.dspace.services.model.RequestInterceptor;
 import org.dspace.utils.servicemanager.ProviderHolder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Required;
 
 /**
  * Implementation of the core caching service, which is available for
  * anyone who is writing code for DSpace to use.
- * 
+ *
  * @author Aaron Zeckoski (azeckoski @ gmail.com)
  */
-public final class CachingServiceImpl implements CachingService, InitializedService, ShutdownService, ConfigChangeListener, ServiceChangeListener {
+public final class CachingServiceImpl
+    implements CachingService, ConfigChangeListener, ServiceChangeListener {
 
-    private static Logger log = LoggerFactory.getLogger(CachingServiceImpl.class);
+    private static final Logger log = LoggerFactory.getLogger(CachingServiceImpl.class);
 
     /**
      * This is the event key for a full cache reset.
      */
     protected static final String EVENT_RESET = "caching.reset";
     /**
-     * The default config location.
+     * The default configuration location.
      */
     protected static final String DEFAULT_CONFIG = "org/dspace/services/caching/ehcache-config.xml";
 
@@ -65,26 +63,26 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
      * All the non-thread caches that we know about.
      * Mostly used for tracking purposes.
      */
-    private Map<String, EhcacheCache> cacheRecord = new ConcurrentHashMap<String, EhcacheCache>();
+    private final Map<String, EhcacheCache> cacheRecord = new ConcurrentHashMap<>();
 
     /**
      * All the request caches.  This is bound to the thread.
      * The initial value of this TL is set automatically when it is
      * created.
      */
-    private Map<String, Map<String, MapCache>> requestCachesMap = new ConcurrentHashMap<String, Map<String, MapCache>>();
+    private final Map<String, Map<String, MapCache>> requestCachesMap = new ConcurrentHashMap<>();
 
     /**
      * @return the current request map which is bound to the current thread
      */
     protected Map<String, MapCache> getRequestCaches() {
-        if (requestService == null || requestService.getCurrentRequestId() == null ) {
+        if (requestService == null || requestService.getCurrentRequestId() == null) {
             return null;
         }
 
         Map<String, MapCache> requestCaches = requestCachesMap.get(requestService.getCurrentRequestId());
         if (requestCaches == null) {
-            requestCaches = new HashMap<String, MapCache>();
+            requestCaches = new HashMap<>();
             requestCachesMap.put(requestService.getCurrentRequestId(), requestCaches);
         }
 
@@ -94,6 +92,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     /**
      * Unbinds all request caches.  Destroys the caches completely.
      */
+    @Override
     public void unbindRequestCaches() {
         if (requestService != null) {
             requestCachesMap.remove(requestService.getCurrentRequestId());
@@ -101,32 +100,36 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     }
 
     private ConfigurationService configurationService;
-    @Autowired
-    @Required
+
+    @Autowired(required = true)
     public void setConfigurationService(ConfigurationService configurationService) {
         this.configurationService = configurationService;
     }
 
     private RequestService requestService;
+
     @Autowired
     public void setRequestService(RequestService requestService) {
         this.requestService = requestService;
     }
 
     private ServiceManager serviceManager;
-    @Autowired
-    @Required
+
+    @Autowired(required = true)
     public void setServiceManager(ServiceManager serviceManager) {
         this.serviceManager = serviceManager;
     }
 
-    /** The underlying cache manager; injected. */
+    /**
+     * The underlying cache manager; injected.
+     */
     protected net.sf.ehcache.CacheManager cacheManager;
-    @Autowired
-    @Required
+
+    @Autowired(required = true)
     public void setCacheManager(net.sf.ehcache.CacheManager cacheManager) {
         this.cacheManager = cacheManager;
     }
+
     public net.sf.ehcache.CacheManager getCacheManager() {
         return cacheManager;
     }
@@ -138,7 +141,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     private int timeToIdleSecs = 600;
 
     /**
-     * Reloads the config settings from the configuration service.
+     * Reloads the configuration settings from the configuration service.
      */
     protected void reloadConfig() {
         // Reload caching configurations, but have sane default values if unspecified in configs
@@ -153,38 +156,45 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
      * WARNING: Do not change the order of these! <br/>
      * If you do, you have to fix the {@link #reloadConfig()} method -AZ
      */
-    private String[] knownConfigNames = {
-            "caching.use.clustering", // bool - whether to use clustering
-            "caching.default.use.disk.store", // whether to use the disk store
-            "caching.default.max.elements", // the maximum number of elements in memory, before they are evicted
-            "caching.default.time.to.live.secs", // the default amount of time to live for an element from its creation date
-            "caching.default.time.to.idle.secs", // the default amount of time to live for an element from its last accessed or modified date
+    private final String[] knownConfigNames = {
+        "caching.use.clustering", // bool - whether to use clustering
+        "caching.default.use.disk.store", // whether to use the disk store
+        "caching.default.max.elements", // the maximum number of elements in memory, before they are evicted
+        "caching.default.time.to.live.secs", // the default amount of time to live for an element from its creation date
+        "caching.default.time.to.idle.secs", // the default amount of time to live for an element from its last
+        // accessed or modified date
     };
+
     /* (non-Javadoc)
      * @see org.dspace.kernel.mixins.ConfigChangeListener#notifyForConfigNames()
      */
+    @Override
     public String[] notifyForConfigNames() {
-        return knownConfigNames == null ? null : knownConfigNames.clone();
+        return knownConfigNames.clone();
     }
-    
+
     /* (non-Javadoc)
      * @see org.dspace.kernel.mixins.ConfigChangeListener#configurationChanged(java.util.List, java.util.Map)
      */
+    @Override
     public void configurationChanged(List<String> changedSettingNames, Map<String, String> changedSettings) {
         reloadConfig();
     }
 
     /**
-     * This will make it easier to handle a provider which might go away 
+     * This will make it easier to handle a provider which might go away
      * because the classloader is gone.
      */
-    private ProviderHolder<CacheProvider> provider = new ProviderHolder<CacheProvider>();
+    private final ProviderHolder<CacheProvider> provider = new ProviderHolder<>();
+
     public CacheProvider getCacheProvider() {
         return provider.getProvider();
     }
+
     private void reloadProvider() {
         boolean current = (getCacheProvider() != null);
-        CacheProvider cacheProvider = serviceManager.getServiceByName(CacheProvider.class.getName(), CacheProvider.class);
+        CacheProvider cacheProvider = serviceManager
+            .getServiceByName(CacheProvider.class.getName(), CacheProvider.class);
         provider.setProvider(cacheProvider);
         if (cacheProvider != null) {
             log.info("Cache Provider loaded: " + cacheProvider.getClass().getName());
@@ -199,13 +209,16 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     /* (non-Javadoc)
      * @see org.dspace.kernel.mixins.ServiceChangeListener#notifyForTypes()
      */
+    @Override
     public Class<?>[] notifyForTypes() {
-        return new Class<?>[] { CacheProvider.class };
+        return new Class<?>[] {CacheProvider.class};
     }
 
     /* (non-Javadoc)
-     * @see org.dspace.kernel.mixins.ServiceChangeListener#serviceRegistered(java.lang.String, java.lang.Object, java.util.List)
+     * @see org.dspace.kernel.mixins.ServiceChangeListener#serviceRegistered(java.lang.String, java.lang.Object, java
+     * .util.List)
      */
+    @Override
     public void serviceRegistered(String serviceName, Object service, List<Class<?>> implementedTypes) {
         provider.setProvider((CacheProvider) service);
     }
@@ -213,41 +226,16 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     /* (non-Javadoc)
      * @see org.dspace.kernel.mixins.ServiceChangeListener#serviceUnregistered(java.lang.String, java.lang.Object)
      */
+    @Override
     public void serviceUnregistered(String serviceName, Object service) {
         provider.setProvider(null);
     }
 
-    /* (non-Javadoc)
-     * @see org.dspace.kernel.mixins.InitializedService#init()
-     */
+    @PostConstruct
     public void init() {
         log.info("init()");
         // get settings
         reloadConfig();
-        
-        // don't display the EhCache update notice in logs - it's meant for developers, not users
-        System.setProperty("net.sf.ehcache.skipUpdateCheck", "true"); 
-
-        // make sure we have a cache manager
-        if (cacheManager == null) {
-            // not injected so we need to create one
-            ClassLoader cl = Thread.currentThread().getContextClassLoader();
-            InputStream is = cl.getResourceAsStream(DEFAULT_CONFIG);
-            try {
-                if (is == null) {
-                    throw new IllegalStateException("Could not init the cache manager, no config file found as a resource in the classloader: " + DEFAULT_CONFIG);
-                }
-                cacheManager = new CacheManager(is);
-            } finally {
-                if (is != null) {
-                    try {
-                        is.close();
-                    } catch (IOException e) {
-                        log.debug("Error closing config stream", e);
-                    }
-                }
-            }
-        }
 
         // get all caches out of the cachemanager and load them into the cache list
         List<Ehcache> ehcaches = getAllEhCaches(false);
@@ -266,17 +254,13 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
         log.info("Caching service initialized:\n" + getStatus(null));
     }
 
-    /* (non-Javadoc)
-     * @see org.dspace.kernel.mixins.ShutdownService#shutdown()
-     */
+    @PreDestroy
     public void shutdown() {
         log.info("destroy()");
         // for some reason this causes lots of errors so not using it for now -AZ
         //ehCacheManagementService.dispose();
         try {
-            if (cacheRecord != null) {
-                cacheRecord.clear();
-            }
+            cacheRecord.clear();
         } catch (RuntimeException e) {
             // whatever
         }
@@ -300,6 +284,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     /* (non-Javadoc)
      * @see org.dspace.services.CachingService#destroyCache(java.lang.String)
      */
+    @Override
     public void destroyCache(String cacheName) {
         if (cacheName == null || "".equals(cacheName)) {
             throw new IllegalArgumentException("cacheName cannot be null or empty string");
@@ -310,7 +295,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
             try {
                 getCacheProvider().destroyCache(cacheName);
             } catch (Exception e) {
-                log.warn("Failure in provider ("+getCacheProvider()+"): " + e.getMessage());
+                log.warn("Failure in provider (" + getCacheProvider() + "): " + e.getMessage());
             }
         }
 
@@ -329,6 +314,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     /* (non-Javadoc)
      * @see org.dspace.services.CachingService#getCache(java.lang.String, org.dspace.services.model.CacheConfig)
      */
+    @Override
     public Cache getCache(String cacheName, CacheConfig cacheConfig) {
         Cache cache = null;
 
@@ -336,7 +322,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
             throw new IllegalArgumentException("cacheName cannot be null or empty string");
         }
 
-        if (cacheConfig != null && CacheScope.REQUEST.equals(cacheConfig.getCacheScope()) ) {
+        if (cacheConfig != null && CacheScope.REQUEST.equals(cacheConfig.getCacheScope())) {
             Map<String, MapCache> caches = getRequestCaches();
             if (caches != null) {
                 cache = caches.get(cacheName);
@@ -354,7 +340,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
                 try {
                     cache = getCacheProvider().getCache(cacheName, cacheConfig);
                 } catch (Exception e) {
-                    log.warn("Failure in provider ("+getCacheProvider()+"): " + e.getMessage());
+                    log.warn("Failure in provider (" + getCacheProvider() + "): " + e.getMessage());
                 }
             }
 
@@ -369,16 +355,17 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     /* (non-Javadoc)
      * @see org.dspace.services.CachingService#getCaches()
      */
+    @Override
     public List<Cache> getCaches() {
-        List<Cache> caches = new ArrayList<Cache>(this.cacheRecord.values());
+        List<Cache> caches = new ArrayList<>(this.cacheRecord.values());
         if (getCacheProvider() != null) {
             try {
-                caches.addAll( getCacheProvider().getCaches() );
+                caches.addAll(getCacheProvider().getCaches());
             } catch (Exception e) {
-                log.warn("Failure in provider ("+getCacheProvider()+"): " + e.getMessage());
+                log.warn("Failure in provider (" + getCacheProvider() + "): " + e.getMessage());
             }
         }
-//        TODO implement reporting on request caches?        
+//        TODO implement reporting on request caches?
 //        caches.addAll(this.requestMap.values());
         Collections.sort(caches, new NameComparator());
         return caches;
@@ -387,6 +374,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     /* (non-Javadoc)
      * @see org.dspace.services.CachingService#getStatus(java.lang.String)
      */
+    @Override
     public String getStatus(String cacheName) {
         final StringBuilder sb = new StringBuilder();
 
@@ -408,7 +396,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
                 sb.append(cache.toString());
                 sb.append("\n");
                 if (cache instanceof EhcacheCache) {
-                    Ehcache ehcache = ((EhcacheCache)cache).getCache();
+                    Ehcache ehcache = ((EhcacheCache) cache).getCache();
                     sb.append(generateCacheStats(ehcache));
                     sb.append("\n");
                 }
@@ -430,7 +418,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
                 sb.append(cache.toString());
                 sb.append("\n");
                 if (cache instanceof EhcacheCache) {
-                    Ehcache ehcache = ((EhcacheCache)cache).getCache();
+                    Ehcache ehcache = ((EhcacheCache) cache).getCache();
                     sb.append(generateCacheStats(ehcache));
                     sb.append("\n");
                 }
@@ -443,6 +431,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     /* (non-Javadoc)
      * @see org.dspace.services.CachingService#resetCaches()
      */
+    @Override
     public void resetCaches() {
         log.debug("resetCaches()");
 
@@ -455,7 +444,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
             try {
                 getCacheProvider().resetCaches();
             } catch (Exception e) {
-                log.warn("Failure in provider ("+getCacheProvider()+"): " + e.getMessage());
+                log.warn("Failure in provider (" + getCacheProvider() + "): " + e.getMessage());
             }
         }
 
@@ -467,7 +456,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
 
     /**
      * Return all caches from the CacheManager.
-     * 
+     *
      * @param sorted if true then sort by name
      * @return the list of all known ehcaches
      */
@@ -478,7 +467,7 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
         if (sorted) {
             Arrays.sort(cacheNames);
         }
-        final List<Ehcache> caches = new ArrayList<Ehcache>(cacheNames.length);
+        final List<Ehcache> caches = new ArrayList<>(cacheNames.length);
         for (String cacheName : cacheNames) {
             caches.add(cacheManager.getEhcache(cacheName));
         }
@@ -486,22 +475,22 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     }
 
     /**
-     * Create an EhcacheCache (and the associated EhCache) using the 
+     * Create an EhcacheCache (and the associated EhCache) using the
      * supplied name (with default settings), or get the cache out of
      * Spring or the current configured cache.
      * <p>
-     * This expects that the cacheRecord has already been checked and 
+     * This expects that the cacheRecord has already been checked and
      * will not check it again.
      * <p>
      * Will proceed in this order:
      * <ol>
-     *  <li>Attempt to load a bean with the name of the cache</li>
-     *  <li>Attempt to load cache from caching system</li>
-     *  <li>Create a new cache by this name</li>
-     *  <li>Put the cache in the cache record</li>
+     * <li>Attempt to load a bean with the name of the cache</li>
+     * <li>Attempt to load cache from caching system</li>
+     * <li>Create a new cache by this name</li>
+     * <li>Put the cache in the cache record</li>
      * </ol>
-     * 
-     * @param cacheName the name of the cache
+     *
+     * @param cacheName   the name of the cache
      * @param cacheConfig the config for this cache
      * @return a cache instance
      */
@@ -543,14 +532,14 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
     }
 
     /**
-     * Create a thread map cache using the supplied name with supplied 
+     * Create a thread map cache using the supplied name with supplied
      * settings.
      * <p>
-     * This expects that the cacheRecord has already been checked and 
+     * This expects that the cacheRecord has already been checked and
      * will not check it again.  It also places the cache into the
      * request map.
-     * 
-     * @param cacheName the name of the cache
+     *
+     * @param cacheName   the name of the cache
      * @param cacheConfig the config for this cache
      * @return a cache instance
      */
@@ -606,10 +595,12 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
         final long size = memSize + diskSize;
         final long hits = stats.getCacheHits();
         final long misses = stats.getCacheMisses();
-        final String hitPercentage = ((hits+misses) > 0) ? ((100l * hits) / (hits + misses)) + "%" : "N/A";
-        final String missPercentage = ((hits+misses) > 0) ? ((100l * misses) / (hits + misses)) + "%" : "N/A";
-        sb.append("  Size: ").append(size).append(" [memory:").append(memSize).append(", disk:").append(diskSize).append("]");
-        sb.append(",  Hits: ").append(hits).append(" [memory:").append(stats.getInMemoryHits()).append(", disk:").append(stats.getOnDiskHits()).append("] (").append(hitPercentage).append(")");
+        final String hitPercentage = ((hits + misses) > 0) ? ((100l * hits) / (hits + misses)) + "%" : "N/A";
+        final String missPercentage = ((hits + misses) > 0) ? ((100l * misses) / (hits + misses)) + "%" : "N/A";
+        sb.append("  Size: ").append(size).append(" [memory:").append(memSize).append(", disk:").append(diskSize)
+          .append("]");
+        sb.append(",  Hits: ").append(hits).append(" [memory:").append(stats.getInMemoryHits()).append(", disk:")
+          .append(stats.getOnDiskHits()).append("] (").append(hitPercentage).append(")");
         sb.append(",  Misses: ").append(misses).append(" (").append(missPercentage).append(")");
         return sb.toString();
     }
@@ -619,6 +610,8 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
      */
     public static final class NameComparator implements Comparator<Cache>, Serializable {
         public static final long serialVersionUID = 1l;
+
+        @Override
         public int compare(Cache o1, Cache o2) {
             return o1.getName().compareTo(o2.getName());
         }
@@ -626,22 +619,25 @@ public final class CachingServiceImpl implements CachingService, InitializedServ
 
     private class CachingServiceRequestInterceptor implements RequestInterceptor {
 
-        public void onStart(String requestId, Session session) {
+        @Override
+        public void onStart(String requestId) {
             if (requestId != null) {
                 Map<String, MapCache> requestCaches = requestCachesMap.get(requestId);
                 if (requestCaches == null) {
-                    requestCaches = new HashMap<String, MapCache>();
+                    requestCaches = new HashMap<>();
                     requestCachesMap.put(requestId, requestCaches);
                 }
             }
         }
 
-        public void onEnd(String requestId, Session session, boolean succeeded, Exception failure) {
+        @Override
+        public void onEnd(String requestId, boolean succeeded, Exception failure) {
             if (requestId != null) {
                 requestCachesMap.remove(requestId);
             }
         }
 
+        @Override
         public int getOrder() {
             return 1;
         }

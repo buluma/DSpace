@@ -7,67 +7,86 @@
  */
 package org.dspace.storage.bitstore;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Map;
+
+import com.amazonaws.AmazonClientException;
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
 import com.amazonaws.services.s3.AmazonS3;
 import com.amazonaws.services.s3.AmazonS3Client;
-import com.amazonaws.services.s3.model.*;
+import com.amazonaws.services.s3.model.AmazonS3Exception;
+import com.amazonaws.services.s3.model.GetObjectRequest;
+import com.amazonaws.services.s3.model.ObjectMetadata;
+import com.amazonaws.services.s3.model.PutObjectRequest;
+import com.amazonaws.services.s3.model.PutObjectResult;
+import com.amazonaws.services.s3.model.S3Object;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpStatus;
-import org.apache.log4j.Logger;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.dspace.content.Bitstream;
-import org.dspace.core.ConfigurationManager;
 import org.dspace.core.Utils;
-import org.springframework.beans.factory.annotation.Required;
-
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Map;
+import org.dspace.services.ConfigurationService;
+import org.dspace.services.factory.DSpaceServicesFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * Asset store using Amazon's Simple Storage Service (S3).
  * S3 is a commercial, web-service accessible, remote storage facility.
  * NB: you must have obtained an account with Amazon to use this store
- * 
+ *
  * @author Richard Rodgers, Peter Dietz
- */ 
+ */
 
-public class S3BitStoreService implements BitStoreService
-{
-    /** log4j log */
-    private static Logger log = Logger.getLogger(S3BitStoreService.class);
-    
-    /** Checksum algorithm */
+public class S3BitStoreService implements BitStoreService {
+    /**
+     * log4j log
+     */
+    private static final Logger log = LogManager.getLogger(S3BitStoreService.class);
+
+    /**
+     * Checksum algorithm
+     */
     private static final String CSA = "MD5";
 
     private String awsAccessKey;
     private String awsSecretKey;
     private String awsRegionName;
 
-    /** container for all the assets */
+    /**
+     * container for all the assets
+     */
     private String bucketName = null;
 
-    /** (Optional) subfolder within bucket where objects are stored */
+    /**
+     * (Optional) subfolder within bucket where objects are stored
+     */
     private String subfolder = null;
-    
-    /** S3 service */
+
+    /**
+     * S3 service
+     */
     private AmazonS3 s3Service = null;
 
-    public S3BitStoreService()
-    {
+    private static final ConfigurationService configurationService
+            = DSpaceServicesFactory.getInstance().getConfigurationService();
+    public S3BitStoreService() {
     }
 
     /**
      * Initialize the asset store
      * S3 Requires:
-     *  - access key
-     *  - secret key
-     *  - bucket name
+     * - access key
+     * - secret key
+     * - bucket name
      */
+    @Override
     public void init() throws IOException {
         if (StringUtils.isBlank(getAwsAccessKey()) || StringUtils.isBlank(getAwsSecretKey())) {
             log.warn("Empty S3 access or secret");
@@ -79,18 +98,18 @@ public class S3BitStoreService implements BitStoreService
 
         // bucket name
         if (StringUtils.isEmpty(bucketName)) {
-            bucketName = "dspace-asset-" + ConfigurationManager.getProperty("dspace.hostname");
+            // get hostname of DSpace UI to use to name bucket
+            String hostname = Utils.getHostName(configurationService.getProperty("dspace.ui.url"));
+            bucketName = "dspace-asset-" + hostname;
             log.warn("S3 BucketName is not configured, setting default: " + bucketName);
         }
 
         try {
-            if (! s3Service.doesBucketExist(bucketName)) {
+            if (!s3Service.doesBucketExist(bucketName)) {
                 s3Service.createBucket(bucketName);
                 log.info("Creating new S3 Bucket: " + bucketName);
             }
-        }
-        catch (Exception e)
-        {
+        } catch (AmazonClientException e) {
             log.error(e);
             throw new IOException(e);
         }
@@ -107,43 +126,36 @@ public class S3BitStoreService implements BitStoreService
             }
         }
 
-        log.info("AWS S3 Assetstore ready to go! bucket:"+bucketName);
+        log.info("AWS S3 Assetstore ready to go! bucket:" + bucketName);
     }
-    
 
-    
+
     /**
      * Return an identifier unique to this asset store instance
-     * 
+     *
      * @return a unique ID
      */
-    public String generateId()
-    {
+    @Override
+    public String generateId() {
         return Utils.generateKey();
     }
 
     /**
      * Retrieve the bits for the asset with ID. If the asset does not
      * exist, returns null.
-     * 
-     * @param bitstream
-     *            The ID of the asset to retrieve
-     * @throws java.io.IOException
-     *                If a problem occurs while retrieving the bits
      *
+     * @param bitstream The ID of the asset to retrieve
      * @return The stream of bits, or null
+     * @throws java.io.IOException If a problem occurs while retrieving the bits
      */
-    public InputStream get(Bitstream bitstream) throws IOException
-    {
+    @Override
+    public InputStream get(Bitstream bitstream) throws IOException {
         String key = getFullKey(bitstream.getInternalId());
-        try
-        {
+        try {
             S3Object object = s3Service.getObject(new GetObjectRequest(bucketName, key));
             return (object != null) ? object.getObjectContent() : null;
-        }
-        catch (Exception e)
-        {
-            log.error("get("+key+")", e);
+        } catch (AmazonClientException e) {
+            log.error("get(" + key + ")", e);
             throw new IOException(e);
         }
     }
@@ -156,19 +168,17 @@ public class S3BitStoreService implements BitStoreService
      * If an exception is thrown, the bits have not been stored.
      * </p>
      *
-     * @param in
-     *            The stream of bits to store
-     * @throws java.io.IOException
-     *             If a problem occurs while storing the bits
+     * @param in The stream of bits to store
+     * @throws java.io.IOException If a problem occurs while storing the bits
      */
-    public void put(Bitstream bitstream, InputStream in) throws IOException
-    {
+    @Override
+    public void put(Bitstream bitstream, InputStream in) throws IOException {
         String key = getFullKey(bitstream.getInternalId());
         //Copy istream to temp file, and send the file, with some metadata
         File scratchFile = File.createTempFile(bitstream.getInternalId(), "s3bs");
         try {
             FileUtils.copyInputStreamToFile(in, scratchFile);
-            Long contentLength = Long.valueOf(scratchFile.length());
+            long contentLength = scratchFile.length();
 
             PutObjectRequest putObjectRequest = new PutObjectRequest(bucketName, key, scratchFile);
             PutObjectResult putObjectResult = s3Service.putObject(putObjectRequest);
@@ -179,8 +189,8 @@ public class S3BitStoreService implements BitStoreService
 
             scratchFile.delete();
 
-        } catch(Exception e) {
-            log.error("put(" + bitstream.getInternalId() +", is)", e);
+        } catch (AmazonClientException | IOException e) {
+            log.error("put(" + bitstream.getInternalId() + ", is)", e);
             throw new IOException(e);
         } finally {
             if (scratchFile.exists()) {
@@ -195,19 +205,15 @@ public class S3BitStoreService implements BitStoreService
      * Checksum used is (ETag) hex encoded 128-bit MD5 digest of an object's content as calculated by Amazon S3
      * (Does not use getContentMD5, as that is 128-bit MD5 digest calculated on caller's side)
      *
-     * @param bitstream
-     *            The asset to describe
-     * @param attrs
-     *            A Map whose keys consist of desired metadata fields
-     *
-     * @throws java.io.IOException
-     *            If a problem occurs while obtaining metadata
+     * @param bitstream The asset to describe
+     * @param attrs     A Map whose keys consist of desired metadata fields
      * @return attrs
-     *            A Map with key/value pairs of desired metadata
-     *            If file not found, then return null
+     * A Map with key/value pairs of desired metadata
+     * If file not found, then return null
+     * @throws java.io.IOException If a problem occurs while obtaining metadata
      */
-    public Map about(Bitstream bitstream, Map attrs) throws IOException
-    {
+    @Override
+    public Map about(Bitstream bitstream, Map attrs) throws IOException {
         String key = getFullKey(bitstream.getInternalId());
         try {
             ObjectMetadata objectMetadata = s3Service.getObjectMetadata(bucketName, key);
@@ -229,8 +235,8 @@ public class S3BitStoreService implements BitStoreService
             if (e.getStatusCode() == HttpStatus.SC_NOT_FOUND) {
                 return null;
             }
-        } catch (Exception e) {
-            log.error("about("+key+", attrs)", e);
+        } catch (AmazonClientException e) {
+            log.error("about(" + key + ", attrs)", e);
             throw new IOException(e);
         }
         return null;
@@ -239,26 +245,24 @@ public class S3BitStoreService implements BitStoreService
     /**
      * Remove an asset from the asset store. An irreversible operation.
      *
-     * @param bitstream
-     *            The asset to delete
-     * @throws java.io.IOException
-     *             If a problem occurs while removing the asset
+     * @param bitstream The asset to delete
+     * @throws java.io.IOException If a problem occurs while removing the asset
      */
-    public void remove(Bitstream bitstream) throws IOException
-    {
+    @Override
+    public void remove(Bitstream bitstream) throws IOException {
         String key = getFullKey(bitstream.getInternalId());
         try {
             s3Service.deleteObject(bucketName, key);
-        } catch (Exception e) {
-            log.error("remove("+key+")", e);
+        } catch (AmazonClientException e) {
+            log.error("remove(" + key + ")", e);
             throw new IOException(e);
         }
     }
 
     /**
      * Utility Method: Prefix the key with a subfolder, if this instance assets are stored within subfolder
-     * @param id
-     *     DSpace bitstream internal ID
+     *
+     * @param id DSpace bitstream internal ID
      * @return full key prefixed with a subfolder, if applicable
      */
     public String getFullKey(String id) {
@@ -273,7 +277,7 @@ public class S3BitStoreService implements BitStoreService
         return awsAccessKey;
     }
 
-    @Required
+    @Autowired(required = true)
     public void setAwsAccessKey(String awsAccessKey) {
         this.awsAccessKey = awsAccessKey;
     }
@@ -282,7 +286,7 @@ public class S3BitStoreService implements BitStoreService
         return awsSecretKey;
     }
 
-    @Required
+    @Autowired(required = true)
     public void setAwsSecretKey(String awsSecretKey) {
         this.awsSecretKey = awsSecretKey;
     }
@@ -295,7 +299,7 @@ public class S3BitStoreService implements BitStoreService
         this.awsRegionName = awsRegionName;
     }
 
-    @Required
+    @Autowired(required = true)
     public String getBucketName() {
         return bucketName;
     }
@@ -314,14 +318,12 @@ public class S3BitStoreService implements BitStoreService
 
     /**
      * Contains a command-line testing tool. Expects arguments:
-     *  -a accessKey -s secretKey -f assetFileName
+     * -a accessKey -s secretKey -f assetFileName
      *
      * @param args the command line arguments given
-     * @throws Exception
-     *     generic exception
+     * @throws Exception generic exception
      */
-    public static void main(String[] args) throws Exception
-    {
+    public static void main(String[] args) throws Exception {
         //TODO use proper CLI, or refactor to be a unit test. Can't mock this without keys though.
 
         // parse command line
@@ -329,24 +331,17 @@ public class S3BitStoreService implements BitStoreService
         String accessKey = null;
         String secretKey = null;
 
-        for (int i = 0; i < args.length; i+= 2)
-        {
-            if (args[i].startsWith("-a"))
-            {
-                accessKey = args[i+1];
-            }
-            else if (args[i].startsWith("-s"))
-            {
-                secretKey = args[i+1];
-            }
-            else if (args[i].startsWith("-f"))
-            {
-                assetFile = args[i+1];
+        for (int i = 0; i < args.length; i += 2) {
+            if (args[i].startsWith("-a")) {
+                accessKey = args[i + 1];
+            } else if (args[i].startsWith("-s")) {
+                secretKey = args[i + 1];
+            } else if (args[i].startsWith("-f")) {
+                assetFile = args[i + 1];
             }
         }
 
-        if (accessKey == null || secretKey == null ||assetFile == null)
-        {
+        if (accessKey == null || secretKey == null || assetFile == null) {
             System.out.println("Missing arguments - exiting");
             return;
         }
@@ -360,8 +355,10 @@ public class S3BitStoreService implements BitStoreService
         Region usEast1 = Region.getRegion(Regions.US_EAST_1);
         store.s3Service.setRegion(usEast1);
 
+        // get hostname of DSpace UI to use to name bucket
+        String hostname = Utils.getHostName(configurationService.getProperty("dspace.ui.url"));
         //Bucketname should be lowercase
-        store.bucketName = "dspace-asset-" + ConfigurationManager.getProperty("dspace.hostname") + ".s3test";
+        store.bucketName = "dspace-asset-" + hostname + ".s3test";
         store.s3Service.createBucket(store.bucketName);
 /* Broken in DSpace 6 TODO Refactor
         // time everything, todo, swtich to caliper

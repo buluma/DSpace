@@ -8,38 +8,66 @@
 
 package org.dspace.importer.external.pubmed.service;
 
-import org.apache.axiom.om.OMElement;
-import org.apache.axiom.om.OMXMLBuilderFactory;
-import org.apache.axiom.om.OMXMLParserWrapper;
-import org.apache.axiom.om.xpath.AXIOMXPath;
-import org.dspace.content.Item;
-import org.dspace.importer.external.exception.MetadataSourceException;
-import org.dspace.importer.external.datamodel.Query;
-import org.dspace.importer.external.datamodel.ImportRecord;
-import org.dspace.importer.external.service.AbstractImportMetadataSourceService;
-import org.jaxen.JaxenException;
-
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.io.StringReader;
+import java.util.Collection;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.concurrent.Callable;
 import javax.ws.rs.client.Client;
 import javax.ws.rs.client.ClientBuilder;
 import javax.ws.rs.client.Invocation;
 import javax.ws.rs.client.WebTarget;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
-import java.io.StringReader;
-import java.util.Collection;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.concurrent.Callable;
+
+import com.google.common.io.CharStreams;
+import org.apache.axiom.om.OMElement;
+import org.apache.axiom.om.OMXMLBuilderFactory;
+import org.apache.axiom.om.OMXMLParserWrapper;
+import org.apache.axiom.om.xpath.AXIOMXPath;
+import org.dspace.content.Item;
+import org.dspace.importer.external.datamodel.ImportRecord;
+import org.dspace.importer.external.datamodel.Query;
+import org.dspace.importer.external.exception.FileMultipleOccurencesException;
+import org.dspace.importer.external.exception.FileSourceException;
+import org.dspace.importer.external.exception.MetadataSourceException;
+import org.dspace.importer.external.service.AbstractImportMetadataSourceService;
+import org.dspace.importer.external.service.components.FileSource;
+import org.dspace.importer.external.service.components.QuerySource;
+import org.jaxen.JaxenException;
 
 /**
  * Implements a data source for querying PubMed Central
  *
  * @author Roeland Dillen (roeland at atmire dot com)
+ * @author Pasquale Cavallo (pasquale.cavallo at 4science dot it)
  */
-public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadataSourceService<OMElement> {
+public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadataSourceService<OMElement>
+    implements QuerySource, FileSource {
+
     private String baseAddress;
 
     private WebTarget pubmedWebTarget;
+
+    private List<String> supportedExtensions;
+
+    /**
+     * Set the file extensions supported by this metadata service
+     * 
+     * @param supportedExtensionsthe file extensions (xml,txt,...) supported by this service
+     */
+    public void setSupportedExtensions(List<String> supportedExtensions) {
+        this.supportedExtensions = supportedExtensions;
+    }
+
+    @Override
+    public List<String> getSupportedExtensions() {
+        return supportedExtensions;
+    }
 
     /**
      * Find the number of records matching a query;
@@ -49,7 +77,7 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
      * @throws MetadataSourceException if the underlying methods throw any exception.
      */
     @Override
-    public int getNbRecords(String query) throws MetadataSourceException {
+    public int getRecordsCount(String query) throws MetadataSourceException {
         return retry(new GetNbRecords(query));
     }
 
@@ -61,12 +89,12 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
      * @throws MetadataSourceException if the underlying methods throw any exception.
      */
     @Override
-    public int getNbRecords(Query query) throws MetadataSourceException {
+    public int getRecordsCount(Query query) throws MetadataSourceException {
         return retry(new GetNbRecords(query));
     }
 
     /**
-     *  Find the number of records matching a string query. Supports pagination
+     * Find the number of records matching a string query. Supports pagination
      *
      * @param query a query string to base the search on.
      * @param start offset to start at
@@ -122,7 +150,7 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
      */
     @Override
     public String getImportSource() {
-        return "http://eutils.ncbi.nlm.nih.gov/entrez/eutils/";
+        return "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/";
     }
 
     /**
@@ -139,7 +167,7 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
 
     /**
      * Finds records based on query object.
-     *  Delegates to one or more MetadataSource implementations based on the uri.  Results will be aggregated.
+     * Delegates to one or more MetadataSource implementations based on the uri.  Results will be aggregated.
      *
      * @param query a query object to base the search on.
      * @return a collection of import records. Only the identifier of the found records may be put in the record.
@@ -184,7 +212,7 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
 
         private GetNbRecords(String queryString) {
             query = new Query();
-            query.addParameter("query",queryString);
+            query.addParameter("query", queryString);
         }
 
         private Query query;
@@ -195,7 +223,8 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
 
         @Override
         public Integer call() throws Exception {
-            WebTarget getRecordIdsTarget = pubmedWebTarget.queryParam("term", query.getParameterAsClass("query", String.class));
+            WebTarget getRecordIdsTarget = pubmedWebTarget
+                .queryParam("term", query.getParameterAsClass("query", String.class));
 
             getRecordIdsTarget = getRecordIdsTarget.path("esearch.fcgi");
 
@@ -212,7 +241,7 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
     }
 
 
-    private String getSingleElementValue(String src, String elementName){
+    private String getSingleElementValue(String src, String elementName) {
         OMXMLParserWrapper records = OMXMLBuilderFactory.createOMBuilder(new StringReader(src));
         OMElement element = records.getDocumentElement();
         AXIOMXPath xpath = null;
@@ -220,7 +249,7 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
         try {
             xpath = new AXIOMXPath("//" + elementName);
             List<OMElement> recordsList = xpath.selectNodes(element);
-            if(!recordsList.isEmpty()) {
+            if (!recordsList.isEmpty()) {
                 value = recordsList.get(0).getText();
             }
         } catch (JaxenException e) {
@@ -235,9 +264,9 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
 
         private GetRecords(String queryString, int start, int count) {
             query = new Query();
-            query.addParameter("query",queryString);
-            query.addParameter("start",start);
-            query.addParameter("count",count);
+            query.addParameter("query", queryString);
+            query.addParameter("start", start);
+            query.addParameter("count", count);
         }
 
         private GetRecords(Query q) {
@@ -246,15 +275,15 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
 
         @Override
         public Collection<ImportRecord> call() throws Exception {
-            String queryString = query.getParameterAsClass("query",String.class);
-            Integer start = query.getParameterAsClass("start",Integer.class);
-            Integer count = query.getParameterAsClass("count",Integer.class);
+            String queryString = query.getParameterAsClass("query", String.class);
+            Integer start = query.getParameterAsClass("start", Integer.class);
+            Integer count = query.getParameterAsClass("count", Integer.class);
 
-            if(count==null || count < 0){
+            if (count == null || count < 0) {
                 count = 10;
             }
 
-            if(start==null || start < 0){
+            if (start == null || start < 0) {
                 start = 0;
             }
 
@@ -313,7 +342,7 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
 
         private GetRecord(String id) {
             query = new Query();
-            query.addParameter("id",id);
+            query.addParameter("id", id);
         }
 
         public GetRecord(Query q) {
@@ -334,7 +363,7 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
 
             List<OMElement> omElements = splitToRecords(response.readEntity(String.class));
 
-            if(omElements.size()==0) {
+            if (omElements.size() == 0) {
                 return null;
             }
 
@@ -346,7 +375,7 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
 
         private Query query;
 
-        private FindMatchingRecords(Item item) throws  MetadataSourceException {
+        private FindMatchingRecords(Item item) throws MetadataSourceException {
             query = getGenerateQueryForItem().generateQueryForItem(item);
         }
 
@@ -356,10 +385,11 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
 
         @Override
         public Collection<ImportRecord> call() throws Exception {
-            List<ImportRecord> records = new LinkedList<ImportRecord>();
 
-            WebTarget getRecordIdsTarget = pubmedWebTarget.queryParam("term", query.getParameterAsClass("term", String.class));
-            getRecordIdsTarget = getRecordIdsTarget.queryParam("field", query.getParameterAsClass("field",String.class));
+            WebTarget getRecordIdsTarget = pubmedWebTarget
+                .queryParam("term", query.getParameterAsClass("term", String.class));
+            getRecordIdsTarget = getRecordIdsTarget
+                .queryParam("field", query.getParameterAsClass("field", String.class));
             getRecordIdsTarget = getRecordIdsTarget.queryParam("usehistory", "y");
             getRecordIdsTarget = getRecordIdsTarget.path("esearch.fcgi");
 
@@ -379,13 +409,41 @@ public class PubmedImportMetadataSourceServiceImpl extends AbstractImportMetadat
             invocationBuilder = getRecordsTarget.request(MediaType.TEXT_PLAIN_TYPE);
             response = invocationBuilder.get();
 
-            List<OMElement> omElements = splitToRecords(response.readEntity(String.class));
-
-            for (OMElement record : omElements) {
-                records.add(transformSourceRecords(record));
-            }
-
-            return records;
+            String xml = response.readEntity(String.class);
+            return parseXMLString(xml);
         }
+    }
+
+
+    @Override
+    public List<ImportRecord> getRecords(InputStream inputStream) throws FileSourceException {
+        String xml = null;
+        try (Reader reader = new InputStreamReader(inputStream, "UTF-8")) {
+            xml = CharStreams.toString(reader);
+            return parseXMLString(xml);
+        } catch (IOException e) {
+            throw new FileSourceException ("Cannot read XML from InputStream", e);
+        }
+    }
+
+    @Override
+    public ImportRecord getRecord(InputStream inputStream) throws FileSourceException, FileMultipleOccurencesException {
+        List<ImportRecord> importRecord = getRecords(inputStream);
+        if (importRecord == null || importRecord.isEmpty()) {
+            throw new FileSourceException("Cannot find (valid) record in File");
+        } else if (importRecord.size() > 1) {
+            throw new FileMultipleOccurencesException("File contains more than one entry");
+        } else {
+            return importRecord.get(0);
+        }
+    }
+
+    private List<ImportRecord> parseXMLString(String xml) {
+        List<ImportRecord> records = new LinkedList<ImportRecord>();
+        List<OMElement> omElements = splitToRecords(xml);
+        for (OMElement record : omElements) {
+            records.add(transformSourceRecords(record));
+        }
+        return records;
     }
 }

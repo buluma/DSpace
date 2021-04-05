@@ -7,7 +7,8 @@
  */
 package org.dspace.discovery.configuration;
 
-import org.springframework.beans.factory.annotation.Required;
+import org.apache.commons.lang3.builder.HashCodeBuilder;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * @author Kevin Van de Velde (kevin at atmire dot com)
@@ -21,7 +22,7 @@ public class DiscoverySortFieldConfiguration {
         return metadataField;
     }
 
-    @Required
+    @Autowired(required = true)
     public void setMetadataField(String metadataField) {
         this.metadataField = metadataField;
     }
@@ -36,13 +37,21 @@ public class DiscoverySortFieldConfiguration {
 
     @Override
     public boolean equals(Object obj) {
-        if(obj != null && obj instanceof DiscoverySortFieldConfiguration){
+        if (obj != null && obj instanceof DiscoverySortFieldConfiguration) {
             DiscoverySortFieldConfiguration compareConfig = (DiscoverySortFieldConfiguration) obj;
-            if(compareConfig.getMetadataField().equals(getMetadataField()) && compareConfig.getType().equals(getType())){
+            if (compareConfig.getMetadataField().equals(getMetadataField()) && compareConfig.getType()
+                                                                                            .equals(getType())) {
                 return true;
             }
         }
         return false;
     }
 
+    @Override
+    public int hashCode() {
+        return new HashCodeBuilder(3, 19)
+            .append(this.getMetadataField())
+            .append(this.getType())
+            .toHashCode();
+    }
 }
