@@ -21,4 +21,4 @@ jobs:
         with:
           upstream: DSpace/DSpace      # set the upstream repo
           upstream-branch: main   # set the upstream branch to merge from
-          branch: master          # set the branch to merge to
+          branch: main          # set the branch to merge to
