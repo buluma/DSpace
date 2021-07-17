@@ -1,8 +1,8 @@
 name: Scheduled Merge Remote Action
 on: 
   schedule:
-    - cron: '30 * * * *'
-    # scheduled for 00:00 every Monday
+    - cron: '* 1 * * *'
+    # scheduled for every 1hr
   push:
     paths:
       - '.github/workflows/upstream.yaml'
