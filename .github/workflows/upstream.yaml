@@ -8,9 +8,9 @@ env:
   # WORKFLOW_TOKEN: ${{ secrets.WORKFLOW_TOKEN }}
   WORKFLOW_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   # Optional, defaults to main
-  UPSTREAM_BRANCH: "master"
+  UPSTREAM_BRANCH: "main"
   # Optional, defaults to UPSTREAM_BRANCH
-  DOWNSTREAM_BRANCH: "master"
+  DOWNSTREAM_BRANCH: "main"
   # Optional merge arguments
   MERGE_ARGS: ""
   # Optional push arguments
