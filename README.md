@@ -1,7 +1,7 @@
 
 # DSpace
 
-[![Build](https://github.com/buluma/DSpace/actions/workflows/build.yml/badge.svg)](https://github.com/buluma/DSpace/actions/workflows/build.yml) [![Build Status](https://travis-ci.com/buluma/DSpace.svg?branch=master)](https://travis-ci.com/buluma/DSpace)
+[![Check for merge conflicts](https://github.com/buluma/DSpace/actions/workflows/label_merge_conflicts.yml/badge.svg)](https://github.com/buluma/DSpace/actions/workflows/label_merge_conflicts.yml) [![Scheduled Merge Remote Action](https://github.com/buluma/DSpace/actions/workflows/upstream.yaml/badge.svg)](https://github.com/buluma/DSpace/actions/workflows/upstream.yaml) [![Build](https://github.com/buluma/DSpace/actions/workflows/build.yml/badge.svg)](https://github.com/buluma/DSpace/actions/workflows/build.yml)
 
 [DSpace Documentation](https://wiki.lyrasis.org/display/DSDOC/) |
 [DSpace Releases](https://github.com/DSpace/DSpace/releases) |
