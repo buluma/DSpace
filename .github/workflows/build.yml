@@ -6,6 +6,10 @@ name: Build
 # Run this Build for all pushes / PRs to current branch
 on: [push, pull_request]
 
+concurrency:
+  group: ${{ github.ref }}-${{ github.workflow }}
+  cancel-in-progress: true
+
 jobs:
   tests:
     runs-on: ubuntu-latest
