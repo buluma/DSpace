@@ -27,7 +27,7 @@
         <hibernate-validator.version>8.0.3.Final</hibernate-validator.version>
         <!-- Pin antlr4-runtime to the version required by Hibernate (compiled with ANTLR tool 4.13.0) -->
         <antlr4.version>4.13.0</antlr4.version>
-        <postgresql.driver.version>42.7.10</postgresql.driver.version>
+        <postgresql.driver.version>42.7.11</postgresql.driver.version>
         <flyway.version>10.22.0</flyway.version>
         <solr.client.version>8.11.4</solr.client.version>
 
@@ -1449,13 +1449,6 @@
                 <version>${asm.version}</version>
             </dependency>
 
-            <!-- Solr-core and Postgres disagree on versions of Checker Qual -->
-            <dependency>
-                <groupId>org.checkerframework</groupId>
-                <artifactId>checker-qual</artifactId>
-                <version>3.54.0</version>
-            </dependency>
-
             <!-- Several dependencies disagree on version of GSON including Jena, Google-OAuth-Client
                  and OpenAIRE Broker-Client -->
             <dependency>
@@ -1867,7 +1860,7 @@
                 <artifactId>guava</artifactId>
                 <version>33.6.0-jre</version>
                 <exclusions>
-                    <!-- Use version provided by Solr / Postgres -->
+                    <!-- Use version provided by solr-core -->
                     <exclusion>
                         <groupId>org.checkerframework</groupId>
                         <artifactId>checker-qual</artifactId>
