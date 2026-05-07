@@ -10789,12 +10789,12 @@ ResourcePolicyBuilder.createResourcePolicy(context, null, adminGroup)
             .andExpect(status().isUnprocessableEntity());
     }
 
-        @Test
+    @Test
     public void uploadAndReplaceTest() throws Exception {
         context.turnOffAuthorisationSystem();
-            configurationService.setProperty("replace-bitstream.enabled", true);
+        configurationService.setProperty("replace-bitstream.enabled", true);
 
-            parentCommunity = CommunityBuilder.createCommunity(context)
+        parentCommunity = CommunityBuilder.createCommunity(context)
             .withName("Parent Community")
             .build();
         Collection collection = CollectionBuilder.createCollection(context, parentCommunity)
@@ -10813,6 +10813,17 @@ ResourcePolicyBuilder.createResourcePolicy(context, null, adminGroup)
                 .withMimeType("text/plain")
                 .build();
         }
+        // Set access conditions on the old file; they should be copied to the new one
+        LocalDate startDate = LocalDate.now();
+        DateTimeFormatter dateFmt = DateTimeFormatter.ISO_LOCAL_DATE;
+        String startDateStr = dateFmt.format(LocalDate.now());
+
+        ResourcePolicyBuilder.createResourcePolicy(context, null, anonymousGroup)
+                             .withDspaceObject(originalBitstream)
+                             .withAction(Constants.READ)
+                             .withPolicyType(TYPE_CUSTOM)
+                             .withName("embargo")
+                             .withStartDate(startDate);
         InputStream pdf = getClass().getResourceAsStream("simple-article.pdf");
         final MockMultipartFile newFile =
             new MockMultipartFile("file", "/local/path/simple-article.pdf", "application/pdf", pdf);
@@ -10820,6 +10831,8 @@ ResourcePolicyBuilder.createResourcePolicy(context, null, adminGroup)
         context.restoreAuthSystemState();
 
         String token = getAuthToken(admin.getEmail(), password);
+
+
         // Upload new file, to replace old one
         getClient(token).perform(multipart("/api/submission/workspaceitems/" + workspaceItem.getID())
                 .file(newFile)
@@ -10833,14 +10846,20 @@ ResourcePolicyBuilder.createResourcePolicy(context, null, adminGroup)
             .andExpect(jsonPath("$.sections.upload.files[0].metadata['dspace.bitstream.isReplacementOf'][0].authority",
                     is(originalBitstream.getID().toString())))
             .andExpect(jsonPath("$.sections.upload.files[0].metadata['dc.source'][0].value",
-                is("/local/path/simple-article.pdf")));
-        // Check new file metadata
+                is("/local/path/simple-article.pdf")))
+            .andExpect(jsonPath("$.sections.upload.files[0].accessConditions[0].name", is("embargo")))
+            .andExpect(jsonPath("$.sections.upload.files[0].accessConditions[0].startDate", is(startDateStr)))
+            .andExpect(jsonPath("$.sections.upload.files[0].accessConditions[0].endDate", nullValue()));
+        // Check new file metadata and access conditions
         getClient(token).perform(get("/api/submission/workspaceitems/" + workspaceItem.getID()))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.sections.upload.files[0].metadata['dc.title'][0].value",
                 is("simple-article.pdf")))
             .andExpect(jsonPath("$.sections.upload.files[0].metadata['dc.source'][0].value",
-                is("/local/path/simple-article.pdf")));
+                is("/local/path/simple-article.pdf")))
+            .andExpect(jsonPath("$.sections.upload.files[0].accessConditions[0].name", is("embargo")))
+            .andExpect(jsonPath("$.sections.upload.files[0].accessConditions[0].startDate", is(startDateStr)))
+            .andExpect(jsonPath("$.sections.upload.files[0].accessConditions[0].endDate", nullValue()));
         originalBitstream = bitstreamService.find(context, originalBitstream.getID());
         List<MetadataValue> originalMetadata = bitstreamService.getMetadata(originalBitstream, DSPACE,
                 BITSTREAM, IS_REPLACED_BY, null);

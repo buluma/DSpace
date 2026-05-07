@@ -188,8 +188,10 @@ public class WorkspaceItemRestRepository extends DSpaceRestRepository<WorkspaceI
         WorkspaceItem source = wis.find(context, id);
         List<ErrorRest> errors = submissionService.uploadFileToInprogressSubmission(context, request, wsi, source,
                 file);
+
+        // Commit & reload before converting to REST to ensure that Bitstream access conditions are taken into account
         context.commit();
-        context.reloadEntity(source);
+        source = context.reloadEntity(source);
         wsi = converter.toRest(source, utils.obtainProjection());
 
         if (!errors.isEmpty()) {
