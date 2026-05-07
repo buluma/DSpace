@@ -86,9 +86,11 @@ public interface BitstreamService extends DSpaceObjectService<Bitstream>, DSpace
         throws IOException, SQLException, AuthorizeException;
 
     /**
-     * Replaces {@code oldBitstream} with Replaces {@code oldBitstream}.
-     * Copies all metadata from {@code oldBitstream} to {@code oldBitstream}
+     * Replaces {@code oldBitstream} with {@code newBitstream}.
+     * Copies all metadata from {@code oldBitstream} to {@code newBitstream}
      * and sets in the same order in the bundle list.
+     * <br>
+     * The {@code oldBitstream} is deleted, along with any Bitstreams derived from it via {@code filter-media}.
      *
      * @param context the current DSpace context
      * @param oldBitstream the bitstream object we want to replace
